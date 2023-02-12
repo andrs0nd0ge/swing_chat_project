@@ -7,10 +7,24 @@ import java.io.Writer;
 import java.net.ServerSocket;
 import java.net.Socket;
 import java.net.SocketException;
+import java.nio.file.Paths;
 import java.util.*;
 import java.util.concurrent.ExecutorService;
 
 public class Service {
+    static UserIdGenerator usernameGenerator;
+
+    static {
+        try {
+            usernameGenerator = new UserIdGenerator(
+                    Paths.get("misc/28K adjectives.txt"),
+                    Paths.get("misc/91K nouns.txt"),
+                    20, 120);
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        }
+    }
+
     static Map<Socket, String> clients = new HashMap<>();
     static Map<Integer, String> usernames = new HashMap<>();
     public static Scanner getReader(Socket socket) throws IOException {
@@ -31,7 +45,7 @@ public class Service {
             while (!server.isClosed()) {
                 Socket clientSocket = server.accept();
                 clients.put(clientSocket, null);
-                usernames.put(clientSocket.getPort(), UUID.randomUUID().toString());
+                usernames.put(clientSocket.getPort(), usernameGenerator.generate());
                 pool.submit(() -> {
                     try {
                         handle(clientSocket);
@@ -40,7 +54,6 @@ public class Service {
                     }
                 });
             }
-            usernames.clear();
         } catch (IOException e) {
             System.out.printf("The port %s is probably busy.\n", port);
             e.printStackTrace();
@@ -59,6 +72,8 @@ public class Service {
             e.printStackTrace();
         }
         System.out.printf("Client %s decided to leave the chat\n", usernames.get(socket.getPort()));
+        clients.remove(socket);
+        usernames.remove(socket.getPort());
     }
 
     public static void notifyAboutConnection(Socket socket) {
@@ -67,10 +82,6 @@ public class Service {
 
     public static String sayHi(Socket socket) {
         return "Hello, " + usernames.get(socket.getPort());
-    }
-
-    public static boolean isQuit(String message) {
-        return "bye".equalsIgnoreCase(message);
     }
 
     public static boolean isEmpty(String message) {
@@ -87,12 +98,18 @@ public class Service {
         sendResponse(sayHi(socket), getWriter(socket));
         while (true) {
             String message = getReader(socket).nextLine();
-            if (isQuit(message) || isEmpty(message)) {
+            if (isEmpty(message)) {
                 break;
             }
-            for (var client : clients.entrySet()) {
-                if (socket.getPort() != client.getKey().getPort()) {
-                    sendResponse(usernames.get(socket.getPort()) + ": " + message, getWriter(client.getKey()));
+            if (message.equals("/list")) {
+                for (var client : usernames.entrySet()) {
+                    sendResponse(client.getValue() + "\n", getWriter(socket));
+                }
+            } else {
+                for (var client : clients.entrySet()) {
+                    if (socket.getPort() != client.getKey().getPort()) {
+                        sendResponse(usernames.get(socket.getPort()) + ": " + message, getWriter(client.getKey()));
+                    }
                 }
             }
         }
