@@ -24,9 +24,7 @@ public class Service {
             throw new RuntimeException(e);
         }
     }
-
     static Map<Socket, String> clients = new HashMap<>();
-    static Map<Integer, String> usernames = new HashMap<>();
     public static Scanner getReader(Socket socket) throws IOException {
         return new Scanner(new InputStreamReader(socket.getInputStream()));
     }
@@ -44,8 +42,7 @@ public class Service {
         try (ServerSocket server = new ServerSocket(port)) {
             while (!server.isClosed()) {
                 Socket clientSocket = server.accept();
-                clients.put(clientSocket, null);
-                usernames.put(clientSocket.getPort(), usernameGenerator.generate());
+                clients.put(clientSocket, usernameGenerator.generate());
                 pool.submit(() -> {
                     try {
                         handle(clientSocket);
@@ -71,17 +68,16 @@ public class Service {
         } catch (IOException e) {
             e.printStackTrace();
         }
-        System.out.printf("Client %s decided to leave the chat\n", usernames.get(socket.getPort()));
+        System.out.printf("Client %s decided to leave the chat\n", clients.get(socket));
         clients.remove(socket);
-        usernames.remove(socket.getPort());
     }
 
     public static void notifyAboutConnection(Socket socket) {
-        System.out.printf("Client %s has connected\n", usernames.get(socket.getPort()));
+        System.out.printf("Client %s has connected\n", clients.get(socket));
     }
 
     public static String sayHi(Socket socket) {
-        return "Hello, " + usernames.get(socket.getPort());
+        return "Hello, " + clients.get(socket);
     }
 
     public static boolean isEmpty(String message) {
@@ -94,6 +90,18 @@ public class Service {
         writer.flush();
     }
 
+    public static String failedUsernameChange(String username) {
+        return String.format("Sorry, username %s is already taken", username);
+    }
+
+    public static String notifyUsersAboutUsernameChange(Socket socket, String username) {
+        return String.format("User %s is now known as %s", clients.get(socket), username);
+    }
+
+    public static String getSuccessfulUsernameChangeFor(String username) {
+        return String.format("You are now known as %s", username);
+    }
+
     public static void sendMessageToClient(Socket socket) throws IOException {
         sendResponse(sayHi(socket), getWriter(socket));
         while (true) {
@@ -102,13 +110,27 @@ public class Service {
                 break;
             }
             if (message.equals("/list")) {
-                for (var client : usernames.entrySet()) {
+                for (var client : clients.entrySet()) {
                     sendResponse(client.getValue() + "\n", getWriter(socket));
+                }
+            } else if (message.startsWith("/name ")) {
+                String[] array = message.split(" ");
+                String currentNickname = array[1].trim();
+                for (var client : clients.entrySet()) {
+                    if (clients.containsValue(currentNickname)) {
+                        sendResponse(failedUsernameChange(currentNickname), getWriter(socket));
+                        break;
+                    } if (!client.getValue().trim().equals(currentNickname) && socket.getPort() != client.getKey().getPort()) {
+                        sendResponse(notifyUsersAboutUsernameChange(socket, currentNickname), getWriter(client.getKey()));
+                    } else if (!client.getValue().trim().equals(currentNickname) && socket.getPort() == client.getKey().getPort()) {
+                        clients.replace(socket, currentNickname);
+                        sendResponse(getSuccessfulUsernameChangeFor(currentNickname), getWriter(client.getKey()));
+                    }
                 }
             } else {
                 for (var client : clients.entrySet()) {
                     if (socket.getPort() != client.getKey().getPort()) {
-                        sendResponse(usernames.get(socket.getPort()) + ": " + message, getWriter(client.getKey()));
+                        sendResponse(clients.get(socket) + ": " + message, getWriter(client.getKey()));
                     }
                 }
             }
