@@ -62,14 +62,18 @@ public class Service {
         Scanner reader = getReader(socket);
         PrintWriter writer = getWriter(socket);
         try (socket; reader; writer) {
-            sendMessageToClient(socket);
+            handleMessageFromClient(socket);
         } catch (NoSuchElementException e) {
             System.out.println("Client has dropped the connection");
         } catch (IOException e) {
             e.printStackTrace();
         }
-        System.out.printf("Client %s decided to leave the chat\n", clients.get(socket));
+        notifyAboutDisconnect(socket);
         clients.remove(socket);
+    }
+
+    public static void notifyAboutDisconnect(Socket socket) {
+        System.out.printf("Client %s decided to leave the chat\n", clients.get(socket));
     }
 
     public static void notifyAboutConnection(Socket socket) {
@@ -94,15 +98,95 @@ public class Service {
         return String.format("Sorry, username %s is already taken", username);
     }
 
-    public static String notifyUsersAboutUsernameChange(Socket socket, String username) {
+    public static String usernameChangeMessageForUsers(Socket socket, String username) {
         return String.format("User %s is now known as %s", clients.get(socket), username);
     }
 
-    public static String getSuccessfulUsernameChangeFor(String username) {
+    public static String successfulUsernameChangeMessageFor(String username) {
         return String.format("You are now known as %s", username);
     }
 
-    public static void sendMessageToClient(Socket socket) throws IOException {
+    public static String failedPrivateMessageSend() {
+        return "There are no users with such usernames";
+    }
+
+    public static void sendMessageToEveryone(Socket socket, String message) throws IOException {
+        for (var client : clients.entrySet()) {
+            if (socket.getPort() != client.getKey().getPort()) {
+                sendResponse(clients.get(socket) + ": " + message, getWriter(client.getKey()));
+            }
+        }
+    }
+
+    public static void getListOfUsers(Socket socket) throws IOException {
+        for (var client : clients.entrySet()) {
+            sendResponse(client.getValue() + "\n", getWriter(socket));
+        }
+    }
+
+    public static String getUsernameFrom(String message) {
+        String[] array = message.split(" ");
+        return array[1].trim();
+    }
+
+    public static String getMessage(String message) {
+        String[] array = message.split(" ");
+        StringBuilder sb = new StringBuilder();
+        for (int i = 2; i < array.length; i++) {
+            sb.append(array[i]).append(" ");
+        }
+        return sb.toString();
+    }
+
+    public static void notifyUsersAboutNicknameChange(Socket socket, String username) throws IOException {
+        for (var client : clients.entrySet()) {
+            if (socket.getPort() != client.getKey().getPort()) {
+                sendResponse(usernameChangeMessageForUsers(socket, username), getWriter(client.getKey()));
+            }
+        }
+    }
+
+    public static void notifySelfAboutNicknameChange(Socket socket, String username) throws IOException {
+        for (var client : clients.entrySet()) {
+            if (socket.getPort() == client.getKey().getPort()) {
+                clients.replace(socket, username);
+                sendResponse(successfulUsernameChangeMessageFor(username), getWriter(socket));
+            }
+        }
+    }
+
+    public static void executeUsernameChange(Socket socket, String currentNickname) throws IOException {
+        if (clients.containsValue(currentNickname)) {
+            sendResponse(failedUsernameChange(currentNickname), getWriter(socket));
+        } else {
+            notifyUsersAboutNicknameChange(socket, currentNickname);
+            notifySelfAboutNicknameChange(socket, currentNickname);
+        }
+    }
+
+    public static void executePrivateMessageSend(String message, Socket socket) throws IOException {
+        String username = getUsernameFrom(message);
+        String sentMessage = getMessage(message);
+        if (!clients.containsValue(username)) {
+            sendResponse(failedPrivateMessageSend(), getWriter(socket));
+        } else {
+            for (var client : clients.entrySet()) {
+                if (socket.getPort() != client.getKey().getPort() && client.getValue().equals(username)) {
+                    sendResponse(clients.get(socket) + ": " + sentMessage, getWriter(client.getKey()));
+                }
+            }
+        }
+    }
+
+    public static void handleWrongCommand(Socket socket) throws IOException {
+        for (var client : clients.entrySet()) {
+            if (socket.getPort() == client.getKey().getPort()) {
+                sendResponse("Wrong command", getWriter(socket));
+            }
+        }
+    }
+
+    public static void handleMessageFromClient(Socket socket) throws IOException {
         sendResponse(sayHi(socket), getWriter(socket));
         while (true) {
             String message = getReader(socket).nextLine();
@@ -110,29 +194,16 @@ public class Service {
                 break;
             }
             if (message.equals("/list")) {
-                for (var client : clients.entrySet()) {
-                    sendResponse(client.getValue() + "\n", getWriter(socket));
-                }
+                getListOfUsers(socket);
             } else if (message.startsWith("/name ")) {
-                String[] array = message.split(" ");
-                String currentNickname = array[1].trim();
-                for (var client : clients.entrySet()) {
-                    if (clients.containsValue(currentNickname)) {
-                        sendResponse(failedUsernameChange(currentNickname), getWriter(socket));
-                        break;
-                    } if (!client.getValue().trim().equals(currentNickname) && socket.getPort() != client.getKey().getPort()) {
-                        sendResponse(notifyUsersAboutUsernameChange(socket, currentNickname), getWriter(client.getKey()));
-                    } else if (!client.getValue().trim().equals(currentNickname) && socket.getPort() == client.getKey().getPort()) {
-                        clients.replace(socket, currentNickname);
-                        sendResponse(getSuccessfulUsernameChangeFor(currentNickname), getWriter(client.getKey()));
-                    }
-                }
+                String currentNickname = getUsernameFrom(message);
+                executeUsernameChange(socket, currentNickname);
+            } else if (message.startsWith("/whisper ")) {
+                executePrivateMessageSend(message, socket);
+            } else if (message.startsWith("/")) {
+                handleWrongCommand(socket);
             } else {
-                for (var client : clients.entrySet()) {
-                    if (socket.getPort() != client.getKey().getPort()) {
-                        sendResponse(clients.get(socket) + ": " + message, getWriter(client.getKey()));
-                    }
-                }
+                sendMessageToEveryone(socket, message);
             }
         }
     }

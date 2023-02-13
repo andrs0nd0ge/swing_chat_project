@@ -24,7 +24,7 @@ public class EchoServer{
 
     public void run() {
         Service.execute(port, pool);
-//        try (ServerSocket server = new ServerSocket(port)) {
+/*        try (ServerSocket server = new ServerSocket(port)) {
 //            while (!server.isClosed()) {
 //                Socket clientSocket = server.accept();
 //                pool.submit(() -> {
@@ -91,5 +91,6 @@ public class EchoServer{
 //        } catch (NoSuchElementException e) {
 //            System.out.println("Client has dropped the connection");
 //        }
-//    }
+*/
+    }
 }
